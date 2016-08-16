@@ -10,99 +10,39 @@
 
 package com.zed1.luaservice;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-
-import org.apache.http.ParseException;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.util.EntityUtils;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.SharedPreferences;
-import android.content.SharedPreferences.Editor;
+import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
 import android.net.VpnService;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Message;
 import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Button;
-import android.widget.Toast;
 
 @SuppressLint("SdCardPath")
 public class MainVpnActivity extends Activity {
 
-	protected Handler mHandler = new Handler() {
-
-		public void handleMessage(Message message) {
-			Intent intent;
-			switch (message.what) {
-			case 0:
-				Toast.makeText(MainVpnActivity.this, "°²×°¿ÉÖ´ĞĞÎÄ¼ş³ö´í",
-						Toast.LENGTH_LONG).show();
-				break;
-			case 1:
-				/**
-				 * Æô¶¯·şÎñ
-				 * 
-				 * 
-				 */
-				startService(new Intent(MainVpnActivity.this,
-						MainVpnService.class));
-				break;
-			case 2:
-				Log.d("<<<---", "start " + (String) message.obj);
-				intent = new Intent("com.zed1.luaservice.START");
-				intent.putExtra("params", (String) message.obj);
-				sendBroadcast(intent);
-				break;
-			case 3:
-				Toast.makeText(MainVpnActivity.this, "Ã»ÓĞ³ö¿Ú", Toast.LENGTH_LONG)
-						.show();
-				break;
-			}
-		}
-
-	};
-
-	protected BroadcastReceiver mReceiver = new BroadcastReceiver() {
-
-		public void onReceive(Context context, Intent intent) {
-			Toast.makeText(MainVpnActivity.this,
-					intent.getIntExtra("STATE", 0) != 0 ? "Á¬½Ó³É¹¦" : "Á¬½Ó¶Ï¿ª",
-					Toast.LENGTH_LONG).show();
-		}
-
-	};
-
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
+		startService(new Intent(this, MainVpnService.class));
 
 		/**
-		 * ·¢Æğ½¨Á¢ VPN ÇëÇó
+		 * è·å– VPN æƒé™
 		 * 
 		 * 
 		 */
-		Intent intent = VpnService.prepare(MainVpnActivity.this);
-
+		Intent intent = VpnService.prepare(this);
 		if (intent != null)
 			startActivityForResult(intent, 0);
-		registerReceiver(mReceiver, new IntentFilter(
-				"com.zed1.luaservice.STATE"));
 
 		setContentView(R.layout.activity_main);
 
@@ -111,140 +51,63 @@ public class MainVpnActivity extends Activity {
 
 					@Override
 					public void onClick(View v) {
-						getParams();
+						/**
+						 * å¯åŠ¨ä»£ç†
+						 * 
+						 * 
+						 */
+						LocalSocket socket = new LocalSocket();
+						try {
+							socket.connect(new LocalSocketAddress(
+									"/data/data/com.zed1.luaservice/luaservice_path",
+									LocalSocketAddress.Namespace.FILESYSTEM));
+							OutputStream os = socket.getOutputStream();
+							os.write("START,proxy.zed1.cn,9000,3f42f6770e2c4a3b91bfd140447e6b65"
+									.getBytes());
+							os.flush();
+						} catch (IOException e) {
+						}
+
+						try {
+							socket.close();
+						} catch (IOException e) {
+						}
 					}
 
 				});
 
 		/**
-		 * °Ñ¿ÉÖ´ĞĞÎÄ¼şÊÍ·Åµ½ÔËĞĞÄ¿Â¼ÖĞÈ¥
+		 * é‡Šæ”¾ç™½åå•
 		 * 
 		 * 
 		 */
-
-		new Thread(new Runnable() {
-
-			@Override
-			public void run() {
-				String[] ll = new String[] { "tun2socks", "client",
-						"whitelist.txt" };
-				String[] fl = new File("/data/data/com.zed1.luaservice/")
-						.list();
-
-				int j;
-
-				for (int i = 0; i < ll.length; i++) {
-					for (j = 0; j < fl.length; j++) {
-						if (ll[i].equals(fl[j])) {
-							break;
-						}
-					}
-					if (j == fl.length)
-						try {
-							InputStream is = getAssets().open(ll[i]);
-							FileOutputStream os = new FileOutputStream(
-									"/data/data/com.zed1.luaservice/" + ll[i]);
-							int c;
-							while ((c = is.read()) != -1) {
-								os.write(c);
-							}
-							is.close();
-							os.close();
-
-						} catch (IOException e) {
-							mHandler.sendEmptyMessage(0);
-							return;
-						}
-				}
-				mHandler.sendEmptyMessage(1);
-			}
-
-		}).start();
-	}
-
-	protected void getParams() {
 		new Thread(new Runnable() {
 
 			@Override
 			public void run() {
 				try {
-					Log.d("<<<---",
-							"get http://202.109.165.79:9000/manage/cgi/api!getDeviceList.action?status=1");
-
-					JSONArray a = new JSONObject(
-							EntityUtils
-									.toString(new DefaultHttpClient()
-											.execute(
-													new HttpGet(
-															"http://202.109.165.79:9000/manage/cgi/api!getDeviceList.action?status=1"))
-											.getEntity()))
-							.getJSONArray("device_list");
-					JSONObject p = null;
-					String uid = null;
-
-					/**
-					 * ÕÒµ½Ò»¸öºÍÉÏ´Î²»Ò»ÑùµÄÅäÖÃ
-					 * 
-					 * 
-					 */
-					{
-						SharedPreferences preference = getSharedPreferences(
-								"last_uid", Activity.MODE_PRIVATE);
-						String last_uid = preference.getString("uid", "");
-						int i = 0;
-						for (; i < a.length(); i++) {
-							if (!a.getJSONObject(i).getString("uid")
-									.equals(last_uid)) {
-								break;
-							}
-						}
-						if (i < a.length()) {
-							p = a.getJSONObject(i);
-						} else {
-							p = a.getJSONObject(0);
-						}
-						uid = p.getString("uid");
-						Editor editor = preference.edit();
-						editor.putString("uid", uid);
-						editor.commit();
+					InputStream is = getAssets().open("whitelist.txt");
+					RandomAccessFile os = new RandomAccessFile(
+							"/data/data/com.zed1.luaservice/whitelist.txt",
+							"rw");
+					byte[] buffer = new byte[4096];
+					int size;
+					while ((size = is.read(buffer)) > 0) {
+						os.write(buffer, 0, size);
 					}
-
-					String[] turn_server = p.getString("turn_server")
-							.split(":");
-					String[] relay_info = p.getString("relay_info").split(":");
-					/**
-					 * ²»¼ì²é·şÎñÆ÷·µ»Ø²ÎÊı
-					 * 
-					 * 
-					 */
-					Message message = new Message();
-					message.obj = "-s " + turn_server[0] + " -p "
-							+ turn_server[1] + " -r " + relay_info[0] + " -l "
-							+ relay_info[1];
-					message.what = 2;
-					mHandler.sendMessage(message);
-					return;
-				} catch (ClientProtocolException e) {
+					is.close();
+					os.close();
 				} catch (IOException e) {
-				} catch (ParseException e) {
-				} catch (JSONException e) {
 				}
-				mHandler.sendEmptyMessage(3);
 			}
 
 		}).start();
 	}
 
-	@Override
-	protected void onDestroy() {
-		super.onDestroy();
-		unregisterReceiver(mReceiver);
-	}
-
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 		if (resultCode == Activity.RESULT_OK) {
 			/**
-			 * ´úÀíÖĞĞèÒªÌîµÄ²ÎÊıÓĞ
+			 * ä»£ç†ä¸­éœ€è¦å¡«çš„å‚æ•°æœ‰
 			 * 
 			 * -r 127.0.0.1 -l 8889 -s 203.156.199.168 -p 5000
 			 * 
@@ -252,7 +115,7 @@ public class MainVpnActivity extends Activity {
 			String params = getIntent().getStringExtra("params");
 
 			if (params != null) {
-				Log.d("<<<---", "start(prepared)" + params);
+				Log.d("test", "start(prepared)" + params);
 
 				Intent intent = new Intent("com.zed1.luaservice.START");
 				intent.putExtra("params", params);
@@ -260,5 +123,4 @@ public class MainVpnActivity extends Activity {
 			}
 		}
 	}
-
 }

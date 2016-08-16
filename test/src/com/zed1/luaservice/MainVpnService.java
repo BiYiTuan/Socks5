@@ -12,10 +12,13 @@ package com.zed1.luaservice;
 
 import java.io.BufferedReader;
 import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 
 import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
@@ -30,30 +33,50 @@ import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
 @SuppressLint("SdCardPath")
-public class MainVpnService extends VpnService implements Runnable {
-
-	boolean mRunning;
+public class MainVpnService extends VpnService {
 
 	/**
-	 * È«¾ÖÕìÌıÆ÷£¬ÓÃÓÚÆôÍ£´úÀí
+	 * è¿è¡ŒçŠ¶æ€
+	 * 
+	 * 
+	 * 
+	 */
+	boolean mRunning;
+	boolean mStart;
+
+	/**
+	 * ç®¡ç†ä¿¡æ¯
+	 * 
+	 * 
+	 */
+	int mManagePort;
+	String mManageAddress;
+	String mUid;
+
+	/**
+	 * VPN è¿æ¥
+	 * 
+	 */
+	ParcelFileDescriptor conn = null;
+
+	/**
+	 * å…¨å±€ä¾¦å¬å™¨ï¼Œç”¨äºå¯åœä»£ç†
 	 * 
 	 */
 	BroadcastReceiver mainVpnServiceReceiver = new BroadcastReceiver() {
 
 		/**
-		 * ·şÎñ±»Æô¶¯ºó³¤ÆÚÔÚºóÌ¨ÔËĞĞ
+		 * æœåŠ¡è¢«å¯åŠ¨åé•¿æœŸåœ¨åå°è¿è¡Œ
 		 * 
 		 * 
 		 */
 		@Override
 		public void onReceive(Context context, Intent intent) {
 			String action = intent.getAction();
-			Log.d("<<<---", "receive " + action);
+			Log.d("vpnService", "receive " + action);
 
 			if (action.equals("com.zed1.luaservice.START")) {
-				if (mRunning)
-					stop();
-				start(intent.getStringExtra("params"));
+				startProxy(intent.getStringExtra("params"));
 			} else {
 				stop();
 			}
@@ -61,173 +84,96 @@ public class MainVpnService extends VpnService implements Runnable {
 
 	};
 
-	Process p1 = null;
-	Process p2 = null;
-
-	/**
-	 * VPN Á¬½Ó
-	 * 
-	 */
-	ParcelFileDescriptor conn = null;
-
-	Thread vpnThread = null;
-	LocalServerSocket vpnThreadSocket = null;
-	boolean vpnThreadRunning;
-
-	/**
-	 * ´úÀí¿Í»§¶ËÃüÁîĞĞ²ÎÊı -r 127.0.0.1 -l 8889 -s 203.156.199.168 -p 5000
-	 * 
-	 * 
-	 */
-	public void startShadowsocksDeamon(String params) {
-		try {
-			p1 = new ProcessBuilder()
-					.command(
-							("/data/data/com.zed1.luaservice/client -b 127.0.0.1 -i 1080 " + params)
-									.split(" ")).redirectErrorStream(true)
-					.start();
-		} catch (IOException e) {
-			Log.d("<<<---", "unable to start client");
-		}
-	}
-
 	public int startVpn() {
-		/**
-		 * ½¨Á¢ VPN Á´½Ó£¬²Ù×÷»á´´½¨Ò»¸ö TUN Éè±¸£¬µØÖ·ÊÇ26.26.26.1£¬×ÓÍøÑÚÂëÊÇ255.255.255.0
-		 * Ìí¼ÓÒ»¸öÂ·ÓÉ£¬ËùÓĞµÄÊı¾İ°ü¶¼×ª·¢ÖÁ¸Ã TUN Éè±¸
-		 * 
-		 * 
-		 */
 		conn = new Builder().addAddress("26.26.26.1", 24)
 				.addRoute("0.0.0.0", 0).addRoute("8.8.0.0", 16).setMtu(1500)
 				.establish();
 
 		if (conn == null) {
-			Log.d("<<<---", "unable to start vpn");
+			Log.d("vpnService", "unable to start vpn");
 			return -1;
 		}
 
 		int fd = conn.getFd();
 
 		/**
-		 * ´Ë´¦¶Ô DNS ²»½øĞĞ´úÀí
+		 * æ­¤å¤„å¯¹ DNS ä¸è¿›è¡Œä»£ç†
 		 * 
 		 * 
 		 */
-		try {
-			p2 = new ProcessBuilder()
-					.command(
-							String.format(
-									"/data/data/com.zed1.luaservice/tun2socks --netif-ipaddr 26.26.26.2 --netif-netmask 255.255.255.0 --socks-server-addr 127.0.0.1:1080 --tunfd %d --tunmtu 1500 --loglevel 3 --enable-udprelay",
-									fd).split(" ")).redirectErrorStream(true)
-					.start();
-
-		} catch (IOException e) {
-			Log.d("<<<---", "unable to start tun2socks");
-		}
+		killProcess("/data/data/com.zed1.luaservice/tun2socks.pid");
+		String[] args = String
+				.format("/data/data/com.zed1.luaservice/tun2socks --netif-ipaddr 26.26.26.2 --netif-netmask 255.255.255.0 --socks-server-addr 127.0.0.1:1080 --tunfd %d --tunmtu 1500 --loglevel 3 --enable-udprelay",
+						fd).split(" ");
+		com.zed1.System.tun2socks(args.length, args);
+		Log.d("vpnService", "tun2socks started");
 		return fd;
 	}
 
-	public void start(String params) {
-
-		/**
-		 * È·±£ÒÑ¾­ÇëÇó VPN
-		 * 
-		 * 
-		 */
-		if (VpnService.prepare(this) != null) {
-			Intent intent = new Intent(this, MainVpnActivity.class);
-			intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+	public void startProxy(String params) {
+		if (mRunning) {
+			killProcess("/data/data/com.zed1.luaservice/client.pid");
+			String[] args = ("/data/data/com.zed1.luaservice/client -d /data/data/com.zed1.luaservice/ -i 1080 " + params)
+					.split(" ");
+			com.zed1.System.client(args.length, args);
+			Log.d("vpnService", "client restarted");
+		} else {
 
 			/**
-			 * µ÷Æğ ACTIVITY ÔÚ»ñÈ¡ÁË VPN È¨ÏŞÖ®ºó×Ô¶¯Æô¶¯´úÀí
+			 * ç¡®ä¿å·²ç»è¯·æ±‚ VPN
 			 * 
 			 * 
 			 */
-			intent.putExtra("params", params);
-			startActivity(intent);
-			return;
-		}
+			if (VpnService.prepare(this) != null) {
+				Intent intent = new Intent(this, MainVpnActivity.class);
+				intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+				intent.putExtra("params", params);
+				startActivity(intent);
 
-		/**
-		 * ĞŞ¸Ä¶ş½øÖÆÎÄ¼şÎª¿ÉÖ´ĞĞ
-		 * 
-		 * 
-		 */
-		try {
+				Log.d("vpnService", "getting vpn authority");
+				return;
+			}
 
-			new ProcessBuilder()
-					.command(
-							"/system/bin/chmod 755 /data/data/com.zed1.luaservice/tun2socks"
-									.split(" ")).redirectErrorStream(true)
-					.start();
+			int fd = startVpn();
+			if (fd != -1) {
 
-			new ProcessBuilder()
-					.command(
-							"/system/bin/chmod 755 /data/data/com.zed1.luaservice/client"
-									.split(" ")).redirectErrorStream(true)
-					.start();
-		} catch (IOException e) {
-			Log.d("<<<---", "chmod failed");
-		}
-
-		vpnThread = new Thread(this);
-		vpnThread.start();
-
-		startShadowsocksDeamon(params);
-		int fd = startVpn();
-
-		if (fd != -1) {
-
-			/**
-			 * TUN2SOCKSÆô¶¯ºó½« VPN ÎÄ¼şÃèÊö·û·¢ËÍ¹ıÈ¥£¬ÔÚ²ÎÊıÖĞÉèÖÃÊÇ²»×àĞ§µÄ
-			 * 
-			 * 
-			 */
-			for (int i = 0; i < 5000; i += 1000) {
-				try {
-					Thread.sleep(i);
-					if (com.zed1.proxy.System.sendfd(fd) != -1) {
-						Intent intent = new Intent("com.zed1.luaservice.STATE");
-						intent.putExtra("STATE", 1);
-						sendBroadcast(intent);
-						mRunning = true;
-						return;
+				/**
+				 * TUN2SOCKSå¯åŠ¨åå°† VPN æ–‡ä»¶æè¿°ç¬¦å‘é€è¿‡å»ï¼Œåœ¨å‚æ•°ä¸­è®¾ç½®æ˜¯ä¸å¥æ•ˆçš„
+				 * 
+				 * 
+				 */
+				for (int i = 0; i < 5000; i += 1000) {
+					try {
+						Thread.sleep(i);
+						if (com.zed1.System.sendfd(fd) != -1) {
+							/**
+							 * å¯åŠ¨ä»£ç†
+							 * 
+							 * 
+							 */
+							killProcess("/data/data/com.zed1.luaservice/client.pid");
+							String[] args = ("/data/data/com.zed1.luaservice/client -d /data/data/com.zed1.luaservice/ -i 1080 " + params)
+									.split(" ");
+							com.zed1.System.client(args.length, args);
+							Log.d("vpnService", "client started");
+							mRunning = true;
+							return;
+						}
+					} catch (InterruptedException e) {
 					}
-				} catch (InterruptedException e) {
 				}
 			}
+			Log.d("vpnService", "no response from tun2socks");
+			stop();
 		}
-
-		stop();
 	}
 
 	public void stop() {
-		/**
-		 * ¹Ø±ÕºóÌ¨½ø³Ì
-		 * 
-		 * 
-		 */
-		if (vpnThread != null) {
-			vpnThreadRunning = false;
-			try {
-				vpnThreadSocket.close();
-			} catch (IOException e) {
-			}
-			vpnThread = null;
-		}
-
-		if (p1 != null) {
-			p1.destroy();
-			p1 = null;
-		}
-		if (p2 != null) {
-			p2.destroy();
-			p2 = null;
-		}
+		killProcess("/data/data/com.zed1.luaservice/tun2socks.pid");
+		killProcess("/data/data/com.zed1.luaservice/client.pid");
 
 		/**
-		 * ¹Ø±Õ VPN Á¬½Ó
+		 * å…³é—­ VPN è¿æ¥
 		 * 
 		 * 
 		 */
@@ -238,61 +184,120 @@ public class MainVpnService extends VpnService implements Runnable {
 			}
 			conn = null;
 		}
-		Intent intent = new Intent("com.zed1.luaservice.STATE");
-		intent.putExtra("STATE", 0);
-		sendBroadcast(intent);
 		mRunning = false;
+	}
+
+	public void killProcess(String pid) {
+		try {
+			InputStream is = new FileInputStream(pid);
+			int size;
+			if ((size = is.available()) > 0) {
+				byte[] buffer = new byte[size];
+				is.read(buffer);
+				is.close();
+				new ProcessBuilder().command(
+						String.format("/system/bin/kill -9 %s",
+								new String(buffer)).split(" ")).start();
+			}
+		} catch (IOException e) {
+		}
 	}
 
 	@Override
 	public void onCreate() {
-		android.os.Debug.waitForDebugger();
-
 		super.onCreate();
 
+		IntentFilter filter = new IntentFilter();
+		filter.addAction("com.zed1.luaservice.START");
 		/**
-		 * ×¢²áÒ»¸öÈ«¾Ö¹ã²¥ÏûÏ¢½ÓÊÕÆ÷
+		 * å¾è¯¢å¯åŠ¨
 		 * 
 		 * 
 		 */
-		IntentFilter filter = new IntentFilter();
-		filter.addAction("com.zed1.luaservice.START");
-		filter.addAction("com.zed1.luaservice.STOP");
 		registerReceiver(mainVpnServiceReceiver, filter);
 
+		/**
+		 * å‘½ä»¤çº¿ç¨‹
+		 * 
+		 * 
+		 */
 		new Thread(new Runnable() {
 
 			@Override
 			public void run() {
+				/**
+				 * ä¿®æ­£å¼‚å¸¸
+				 * 
+				 * 
+				 */
+				LocalServerSocket server = null;
+				LocalSocket localSocket = null;
+				boolean running = false;
+
 				try {
-					LocalSocket localSocket = new LocalSocket();
+					localSocket = new LocalSocket();
 					localSocket.bind(new LocalSocketAddress(
 							"/data/data/com.zed1.luaservice/luaservice_path",
 							LocalSocketAddress.Namespace.FILESYSTEM));
 
-					LocalServerSocket server = new LocalServerSocket(
-							localSocket.getFileDescriptor());
-
-					boolean running = true;
-					while (running) {
+					server = new LocalServerSocket(localSocket
+							.getFileDescriptor());
+					running = true;
+				} catch (IOException e) {
+				}
+				while (running) {
+					try {
 						LocalSocket socket = server.accept();
 						BufferedReader reader = new BufferedReader(
 								new InputStreamReader(socket.getInputStream()));
 						String params = reader.readLine();
 						if (params.startsWith("START")) {
 							String[] p = params.split(",");
-							if (p.length == 5) {
-								start("-r " + p[1] + " -l " + p[2] + " -s "
-										+ p[3] + " -p " + p[4]);
+							if (p.length == 4) {
+								/**
+								 * é‡è®¾å‚æ•°
+								 * 
+								 * 
+								 */
+								mManageAddress = p[1];
+								mManagePort = Integer.parseInt(p[2]);
+								mUid = p[3];
+
+								Log.d("vpnService", "start");
+								mStart = true;
 								socket.getOutputStream()
 										.write(mRunning ? 1 : 0);
 							}
 						} else if (params.startsWith("STOP")) {
 							stop();
+							/**
+							 * ç»“æŸé“¾æ¥
+							 * 
+							 * 
+							 */
+							mStart = false;
+							socket.getOutputStream().write(mRunning ? 1 : 0);
+						} else if (params.startsWith("RESTART")) {
+							/**
+							 * æ›´æ–°å¯¹ç«¯
+							 * 
+							 * 
+							 */
+							mStart = true;
+						} else if (params.startsWith("STATE")) {
+							/**
+							 * çŠ¶æ€æŸ¥è¯¢
+							 * 
+							 * 
+							 */
 							socket.getOutputStream().write(mRunning ? 1 : 0);
 						}
-					}
 
+					} catch (IOException e) {
+					}
+				}
+
+				try {
 					localSocket.close();
 				} catch (IOException e) {
 				}
@@ -300,69 +305,178 @@ public class MainVpnService extends VpnService implements Runnable {
 
 		}).start();
 
-		Log.d("<<<---", "service created");
-	}
-
-	/**
-	 * ´úÀíÖĞ´´½¨µÄÁ´½Ó²»ÄÜ×ß VPN ĞÎ³É»·Â·£¬Æô¶¯Ò»¸öÏß³Ì¶Ô´úÀíÖĞµÄ SOCKET ½øĞĞÉèÖÃ
-	 * 
-	 * 
-	 */
-	@Override
-	public void run() {
-
-		try {
-			LocalSocket b = new LocalSocket();
-			b.bind(new LocalSocketAddress(
-					"/data/data/com.zed1.luaservice/protect_path",
-					LocalSocketAddress.Namespace.FILESYSTEM));
-
-			vpnThreadSocket = new LocalServerSocket(b.getFileDescriptor());
-			vpnThreadRunning = true;
+		/**
+		 * ä»£ç†çº¿ç¨‹
+		 * 
+		 * 
+		 */
+		new Thread(new Runnable() {
 			/**
-			 * Æô¶¯½ÓÊÕ
+			 * ä»£ç†ä¸­åˆ›å»ºçš„é“¾æ¥ä¸èƒ½èµ° VPN å½¢æˆç¯è·¯ï¼Œå¯åŠ¨ä¸€ä¸ªçº¿ç¨‹å¯¹ä»£ç†ä¸­çš„ SOCKET è¿›è¡Œè®¾ç½®
+			 * 
 			 * 
 			 */
-			while (vpnThreadRunning) {
-				LocalSocket l = vpnThreadSocket.accept();
-				InputStream is = l.getInputStream();
-				is.read();
-				FileDescriptor[] fds = l.getAncillaryFileDescriptors();
+			@Override
+			public void run() {
+				LocalSocket b = null;
+				LocalServerSocket localSocket = null;
+				boolean running = false;
+				try {
+					b = new LocalSocket();
+					b.bind(new LocalSocketAddress(
+							"/data/data/com.zed1.luaservice/protect_path",
+							LocalSocketAddress.Namespace.FILESYSTEM));
 
-				if (fds != null && fds.length != 0) {
+					localSocket = new LocalServerSocket(b.getFileDescriptor());
+					running = true;
+				} catch (IOException e) {
+				}
+				/**
+				 * å¯åŠ¨æ¥æ”¶
+				 * 
+				 */
+				while (running) {
+					InputStream is = null;
 					try {
-						/**
-						 * Í¨¹ı·´Éä»ñÈ¡ÁËÎÄ¼şÃèÊö·ûµÄ INT Öµ
-						 * 
-						 * 
-						 */
-						int fd = (Integer) fds[0].getClass()
-								.getDeclaredMethod("getInt$").invoke(fds[0]);
-						OutputStream os = l.getOutputStream();
+						LocalSocket l = localSocket.accept();
+						is = l.getInputStream();
+						is.read();
+						FileDescriptor[] fds = l.getAncillaryFileDescriptors();
 
-						/**
-						 * ½«´úÀíÊ¹ÓÃµÄ SOCKET ·ÖÀë³öÀ´£¬´Ó¶ø×ßÄ¬ÈÏµÄÍø¹Ø
-						 * 
-						 * 
-						 */
-						os.write(protect(fd) ? 0 : 1);
-						com.zed1.proxy.System.jniclose(fd);
-						os.close();
+						if (fds != null && fds.length != 0) {
+
+							/**
+							 * é€šè¿‡åå°„è·å–äº†æ–‡ä»¶æè¿°ç¬¦çš„ INT å€¼
+							 * 
+							 * 
+							 */
+							int fd = (Integer) fds[0].getClass()
+									.getDeclaredMethod("getInt$")
+									.invoke(fds[0]);
+							OutputStream os = l.getOutputStream();
+
+							/**
+							 * å°†ä»£ç†ä½¿ç”¨çš„ SOCKET åˆ†ç¦»å‡ºæ¥ï¼Œä»è€Œèµ°é»˜è®¤çš„ç½‘å…³
+							 * 
+							 * 
+							 */
+							os.write(protect(fd) ? 0 : 1);
+							com.zed1.System.jniclose(fd);
+							os.close();
+
+						}
 					} catch (Exception e) {
 					}
+
+					try {
+						is.close();
+					} catch (IOException e) {
+					}
 				}
-				is.close();
+
+				try {
+					b.close();
+				} catch (IOException e) {
+				}
 			}
 
-			b.close();
-		} catch (IOException e) {
-		}
+		}).start();
+
+		/**
+		 * è·å–å¯¹ç«¯ä¿¡æ¯å¹¶è¿æ¥
+		 * 
+		 * 
+		 */
+		new Thread(new Runnable() {
+
+			@Override
+			public void run() {
+				while (true) {
+					if (mStart) {
+						Socket socket = null;
+						try {
+							socket = new Socket();
+							/**
+							 * è¦å…ˆå»ºç«‹å†ä¿æŠ¤
+							 * 
+							 * 
+							 */
+							socket.setTcpNoDelay(true);
+							protect(socket);
+							socket.connect(new InetSocketAddress(
+									mManageAddress, mManagePort));
+							socket.getOutputStream()
+									.write(String
+											.format("GET /manage/cgi/api!getProxyByUid.action?uid=%s HTTP/1.1\r\nHost: %s:%d\r\nConnection: Keep-Alive\r\n\r\n",
+													mUid, mManageAddress,
+													mManagePort).getBytes());
+
+							InputStream is = socket.getInputStream();
+							is.read();
+							int size = is.available();
+							if (size > 0) {
+								byte[] buffer = new byte[size];
+								is.read(buffer);
+
+								String content = new String(buffer);
+								if (content.indexOf("\r\n\r\n") != -1) {
+									/**
+									 * å·²è·å–å¯¹ç«¯ä¿¡æ¯
+									 * 
+									 * 
+									 */
+									String[] params = content.substring(
+											content.indexOf("\r\n\r\n") + 4)
+											.split(":");
+									if (params != null && params.length == 5)
+										startProxy("-s " + params[1] + " -p "
+												+ params[2] + " -r "
+												+ params[3] + " -l "
+												+ params[4]);
+									else {
+										Log.d("vpnService", "peer is offline");
+									}
+									mStart = false;
+								}
+							} else {
+								Log.d("vpnService", "get peer failed");
+							}
+						} catch (IOException e) {
+							Log.d("vpnService", String.format(
+									"unable to connect %s:%d", mManageAddress,
+									mManagePort));
+						}
+
+						try {
+							socket.close();
+						} catch (IOException e) {
+						}
+					}
+					try {
+						Thread.sleep(1000);
+					} catch (InterruptedException e) {
+					}
+				}
+			}
+
+		}).start();
+
+		Log.d("vpnService", "service created");
+	}
+
+	public int onStartCommand(Intent intent, int flags, int startId) {
+		/**
+		 * é˜²æ­¢ç³»ç»Ÿé”€æ¯æœåŠ¡
+		 * 
+		 * 
+		 */
+		return super.onStartCommand(intent, START_STICKY, startId);
 	}
 
 	@Override
 	public void onRevoke() {
 		/**
-		 * ·ÀÖ¹VPN ·şÎñ¹Ø±ÕÊ±Ïú»Ù·şÎñ
+		 * é˜²æ­¢VPN æœåŠ¡å…³é—­æ—¶é”€æ¯æœåŠ¡
 		 * 
 		 */
 		stop();

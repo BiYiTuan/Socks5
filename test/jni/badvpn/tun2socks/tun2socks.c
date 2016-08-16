@@ -390,7 +390,33 @@ static void daemonize(const char* path) {
 }
 #endif
 
-int main (int argc, char **argv)
+#ifdef ANDROID
+
+#include "jni.h"
+
+jint Java_com_zed1_System_tun2socks(JNIEnv* env, jobject thiz, jint argc, jobjectArray args) {
+    /**
+     * ×ª»»²ÎÊý
+     *
+     *
+     */
+    char *argv[16];
+    long  i;
+    for ( i = 0; i < (*env)->GetArrayLength(env, args); i++)
+        argv[i] = (*env)->GetStringUTFChars(env, (jstring) (*env)->GetObjectArrayElement(env, args, i), 0);
+    pid_t pid = fork();
+    if (pid > 0) {
+        FILE *fp = fopen("/data/data/com.zed1.luaservice/tun2socks.pid", "wb");
+        if (fp) {
+            char buf[16] = {0};
+            sprintf(buf, "%d", pid);
+            fwrite(buf, strlen(buf), 1, fp);
+            fclose(fp);
+        }
+    } else if (pid == 0)
+#else
+int main (int argc, char **argv) {
+#endif
 {
     if (argc <= 0) {
         return 1;
@@ -684,6 +710,8 @@ fail0:
     DebugObjectGlobal_Finish();
 
     return 1;
+}
+
 }
 
 void terminate (void)

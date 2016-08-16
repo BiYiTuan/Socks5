@@ -232,7 +232,7 @@
 #define _EVENT_HAVE_STRTOLL 1
 
 /* Define to 1 if the system has the type `struct addrinfo'. */
-#define _EVENT_HAVE_STRUCT_ADDRINFO 1
+/* #undef _EVENT_HAVE_STRUCT_ADDRINFO */
 
 /* Define to 1 if the system has the type `struct in6_addr'. */
 #define _EVENT_HAVE_STRUCT_IN6_ADDR 1
