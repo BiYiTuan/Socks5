@@ -34,7 +34,7 @@ typedef int sint;
 #define SETTIMEOUT(ev, sec, cb, arg) do {struct timeval tv = {sec}; if (ev) event_free(ev); ev = evtimer_new(base, cb, arg); evtimer_add(ev, &tv);} while (0)
 
 #define MAX_BUF_SIZE 32768
-#define TIMEOUT 180
+#define TIMEOUT 60
 
 #define PACKAGE "com.zed1.luaservice"
 #define PACKAGE_NAME PACKAGE "/.MainActivity"
@@ -71,6 +71,8 @@ sint exec_shell_command(char *cmd, char *buf, int buf_size) {
         if (!system(cmd)) {
             read(fd[0], buf, buf_size);
             dup2(fd_dup[0], fd_dup[1]);
+            
+            fprintf(stdout, "%s returns %s", cmd, buf);
             return 0;
         }
     }
@@ -157,11 +159,22 @@ sint reboot_sys() {
  */
 sint kill_all_process(char *process) {
     int pid;
+    int old = 0;
     char buf[MAX_BUF_SIZE];
 	
     while ((pid = get_process_pid(process)) != -1) {
-        sprintf(buf, SU " -c \"" KILL "\" -9 %d", pid);
-        if (system(buf))
+        if (pid!= old) {
+            sprintf(buf, SU " -c \"" KILL " -9 %d\"", pid);
+            old = pid;
+            fprintf(stdout, "%s\n", buf);
+            if (system(buf))
+                return -1;
+        } else
+            /**
+             * 没有 kill 掉返回失败
+             *
+             *
+             */
             return -1;
     }
     return 0;
@@ -229,23 +242,27 @@ void conn(struct evconnlistener *listener, evutil_socket_t new_fd, struct sockad
  *
  */
 sint main(int argc, char *argv[]) {
-    base = event_base_new();
-    assert(base != NULL);
-    {
-        struct sockaddr_in sin;
-		
-        sin.sin_family = AF_INET;
-        sin.sin_addr.s_addr = htonl(INADDR_ANY);
-        sin.sin_port = htons(PORT);
-        assert(evconnlistener_new_bind(base, conn, NULL, LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 5, (struct sockaddr *) &sin, sizeof(struct sockaddr)));
-        /**
-         * 定时检查
-         *
-         *
-         */
-        SETTIMEOUT(tick, 1, step, NULL);
-        event_base_dispatch(base);
+    pid_t pid = fork();
+    if (pid == 0) {
+        setuid(0);
+        base = event_base_new();
+        assert(base != NULL);
+        {
+            struct sockaddr_in sin;
+            
+            sin.sin_family = AF_INET;
+            sin.sin_addr.s_addr = htonl(INADDR_ANY);
+            sin.sin_port = htons(PORT);
+            assert(evconnlistener_new_bind(base, conn, NULL, LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 5, (struct sockaddr *) &sin, sizeof(struct sockaddr)));
+            /**
+             * 定时检查
+             *
+             *
+             */
+            SETTIMEOUT(tick, 1, step, NULL);
+            event_base_dispatch(base);
+        }
+        fprintf(stdout, "event loop quited\n");
     }
-    fprintf(stdout, "event loop quited\n");
     return 0;
 }
