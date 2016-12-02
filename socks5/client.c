@@ -1,4 +1,4 @@
-// +----------------------------------------------------------------------
+ï»¿// +----------------------------------------------------------------------
 // | ZYSOFT [ MAKE IT OPEN ]
 // +----------------------------------------------------------------------
 // | Copyright (c) 2016 ZYSOFT All rights reserved.
@@ -24,11 +24,13 @@
 #include <string.h>
 #include <event.h>
 
+#include <turn_client.h>
+
 #define MAX_BUF_SIZE 512
 #define CLOSETIME 5
 
 /**
- * windows ÏÂÒªÊÇÓÃ closesocket º¯Êı¹Ø±ÕÁ¬½Ó
+ * windows ä¸‹è¦æ˜¯ç”¨ closesocket å‡½æ•°å…³é—­è¿æ¥
  *
  *
  */
@@ -39,9 +41,9 @@
 #include <arpa/inet.h>
 
 /**
- * °²×¿ÏÂÊ¹ÓÃ logcat
+ * å®‰å“ä¸‹ä½¿ç”¨ logcat
  *
- * ±àÒëµÄÊ±ºòĞèÒª¼Ó debug
+ * ç¼–è¯‘çš„æ—¶å€™éœ€è¦åŠ  debug
  *
  * ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=./Android.mk NDK_DEBUG=1
  *
@@ -58,14 +60,14 @@
 #define SETTIMEOUT(ev, sec, cb, arg) do {struct timeval tv = {sec}; if (ev) event_free(ev); ev = evtimer_new(base, cb, arg); evtimer_add(ev, &tv);} while (0);
 
 /**
- * °×Ãûµ¥´¦Àí
+ * ç™½åå•å¤„ç†
  *
  *
  */
 struct context_t {
     long status;
     /**
-     * ´¦ÀíºóÊ£ÏÂµÄÊı¾İ
+     * å¤„ç†åå‰©ä¸‹çš„æ•°æ®
      *
      *
      */
@@ -77,7 +79,7 @@ struct context_t {
     struct bufferevent *remote;
     
     /**
-     * ÏìÓ¦Êı¾İ
+     * å“åº”æ•°æ®
      *
      *
      */
@@ -91,7 +93,7 @@ struct socks5_request_t {
     char rsv;
     
     /**
-     * µØÖ·ÀàĞÍ
+     * åœ°å€ç±»å‹
      *
      *
      */
@@ -106,7 +108,7 @@ char *server_port = "5000";
 char *listen_port = "8888";
 
 /**
- * TURN ĞéÄâµØÖ·
+ * TURN è™šæ‹Ÿåœ°å€
  *
  *
  */
@@ -118,17 +120,39 @@ char **g_argv;
 char *dir;
 
 /**
- * Á´½ÓÊı
+ * é“¾æ¥æ•°
  *
  *
  */
 static int connected = 0;
 
 /**
- * ¼ì²éµØÖ·ÊÇ²»ÊÇÔÚ°×Ãûµ¥ÖĞ
+ * æ£€æŸ¥åœ°å€æ˜¯ä¸æ˜¯åœ¨ç™½åå•ä¸­
  *
  *
  */
+long inipsegment(char *address, int prefix, char *host) {
+    unsigned long mask = 0;
+    unsigned long m = 0;
+    int i = 0;
+    for (; i < 4; i++) {
+        mask >>= 8;
+        if (prefix - 8 > 0) {
+            prefix -= 8;
+            mask |= 0xFF000000;
+        } else if (prefix > 0) {
+            while (prefix--) {
+                m >>= 1;
+                m |= 0x80000000;
+            }
+            mask |= m;
+        }
+    }
+    if ((inet_addr(address) & mask) == (inet_addr(host) & mask))
+        return 0;
+    return -1;
+}
+
 long inwhitelist(char *host) {
     static char buf[2048];
     static long loaded = -1;
@@ -145,10 +169,17 @@ long inwhitelist(char *host) {
     }
     char tmp[MAX_BUF_SIZE];
     char *p = buf;
+    char *s;
     while (sscanf(p, "%s\n", tmp) > 0) {
         if (!memcmp(host, tmp, strlen(host)))
             return 0;
-        else if (p - buf < MAX_BUF_SIZE)
+        if ((s = strstr(tmp, "/")) != NULL) {
+            s[0] = 0;
+            if (!inipsegment(tmp, atoi(&s[1]), host))
+                return 0;
+            s[0] = '/';
+        }
+        if (p - buf < sizeof(buf))
             p += strlen(tmp);
         else
             break;
@@ -160,7 +191,7 @@ void freecontext(struct context_t *context) {
     fprintf(stdout, "connection closed\n");
 
     /**
-     * ĞŞÕıÄÚ´æÎÊÌâ
+     * ä¿®æ­£å†…å­˜é—®é¢˜
      *
      *
      */
@@ -168,7 +199,7 @@ void freecontext(struct context_t *context) {
         event_free(context->tick);
     
     /**
-     * ¼ÇÂ¼Á´½ÓÊı
+     * è®°å½•é“¾æ¥æ•°
      *
      *
      */
@@ -188,7 +219,7 @@ void close_later(int fd, short events, void *arg) {
 }
 
 /**
- * ³ö´íÊ±¶Ï¿ª
+ * å‡ºé”™æ—¶æ–­å¼€
  *
  *
  */
@@ -205,7 +236,7 @@ void remote_quit(struct bufferevent *bev, short events, void *arg) {
 
     if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
         /**
-         * µÈ´ı server Êı¾İÍê³É
+         * ç­‰å¾… server æ•°æ®å®Œæˆ
          *
          *
          */
@@ -220,7 +251,7 @@ void remote_read(struct bufferevent *bev, void *arg) {
 
     if (context->status == 4) {
         /**
-         * Ìø¹ı VER METHOD
+         * è·³è¿‡ VER METHOD
          *
          *
          */
@@ -248,7 +279,7 @@ void remote_read(struct bufferevent *bev, void *arg) {
 }
 
 /**
- * ´´½¨Ò»¸öĞÂÁ¬½Ó
+ * åˆ›å»ºä¸€ä¸ªæ–°è¿æ¥
  *
  *
  */
@@ -281,7 +312,7 @@ void open_remote(struct context_t *context) {
             bufferevent_enable(bev, EV_READ | EV_PERSIST);
             
             /**
-             * ·¢ËÍÒ»¸ö REP
+             * å‘é€ä¸€ä¸ª REP
              *
              *
              */
@@ -307,14 +338,14 @@ void open_remote(struct context_t *context) {
                 bufferevent_enable(bev, EV_READ | EV_PERSIST);
                 
                 /**
-                 * ºöÂÔ VER METHOD ÏìÓ¦Á¬Ğø·¢ËÍ VER NMETHOD METHOD VER CMD RSV ATYP DST.ADDR DST.PORT
+                 * å¿½ç•¥ VER METHOD å“åº”è¿ç»­å‘é€ VER NMETHOD METHOD VER CMD RSV ATYP DST.ADDR DST.PORT
                  *
                  *
                  */
                 bufferevent_write(context->remote, "\x05\x01\x00", 3);
 #ifdef RESOLVE
                 /**
-                 * ÔÚ±¾µØ½âÎöÓòÃû
+                 * åœ¨æœ¬åœ°è§£æåŸŸå
                  *
                  *
                  */
@@ -336,7 +367,7 @@ void open_remote(struct context_t *context) {
         }
 #ifdef ANDROID
         /**
-         * ¶Ô¶ËµôÏß
+         * å¯¹ç«¯æ‰çº¿
          *
          *
          *
@@ -382,7 +413,7 @@ void server_read(struct bufferevent *bev, void *arg) {
                         break;
                     }
                 /**
-                 * Ã»ÓĞÖ§³ÖµÄ·½·¨
+                 * æ²¡æœ‰æ”¯æŒçš„æ–¹æ³•
                  *
                  *
                  */
@@ -435,7 +466,7 @@ void server_read(struct bufferevent *bev, void *arg) {
                             return ;
                     } else {
                         /**
-                         * ²»Ö§³ÖµÄµØÖ·ÀàĞÍ
+                         * ä¸æ”¯æŒçš„åœ°å€ç±»å‹
                          *
                          *
                          */
@@ -444,7 +475,7 @@ void server_read(struct bufferevent *bev, void *arg) {
                     }
                 } else {
                     /**
-                     * ²»Ö§³ÖµÄÃüÁî
+                     * ä¸æ”¯æŒçš„å‘½ä»¤
                      *
                      *
                      */
@@ -463,7 +494,7 @@ void server_read(struct bufferevent *bev, void *arg) {
             return ;
         } else if (context->status == 3) {
             /**
-             * ·µ»ØĞ­Òé´íÎó
+             * è¿”å›åè®®é”™è¯¯
              *
              *
              */
@@ -494,7 +525,7 @@ void open_server(struct evconnlistener *listener, evutil_socket_t new_fd, struct
 }
 
 /**
- * Êä³ö°ïÖú,±ØÒª²ÎÊıÎª¹ÜÀí·şÎñÆ÷µØÖ·
+ * è¾“å‡ºå¸®åŠ©,å¿…è¦å‚æ•°ä¸ºç®¡ç†æœåŠ¡å™¨åœ°å€
  *
  *
  */
@@ -522,7 +553,7 @@ long client() {
 #endif
 
     /**
-     * ²ÎÊıÅäÖÃ
+     * å‚æ•°é…ç½®
      *
      *
      */
@@ -554,7 +585,7 @@ long client() {
 
 #ifdef ANDROID
     /**
-     * ·ÀÖ¹ÖØ¸´Æô¶¯
+     * é˜²æ­¢é‡å¤å¯åŠ¨
      *
      *
      */
@@ -578,7 +609,7 @@ long client() {
 #endif
 
     /**
-     * TURN µØÖ·,¹ÜÀí·şÎñÆ÷µØÖ·¾ùÓĞÄ¬ÈÏÖµ
+     * TURN åœ°å€,ç®¡ç†æœåŠ¡å™¨åœ°å€å‡æœ‰é»˜è®¤å€¼
      *
      *
      */
@@ -588,7 +619,7 @@ long client() {
     }
     
     /**
-     * Æô¶¯·şÎñ
+     * å¯åŠ¨æœåŠ¡
      *
      *
      */
@@ -598,7 +629,7 @@ long client() {
     fprintf(stdout, "turn: %s:%s\nrelay: %s:%s\n", server_address, server_port, report_address, report_port);
     
     /**
-     * ¼àÌıÁ¬½Ó
+     * ç›‘å¬è¿æ¥
      *
      *
      */
@@ -617,7 +648,7 @@ long main(int argc, char *argv[]) {
     g_argc = argc;
     g_argv = argv;
     /**
-     * ÎŞÊØ»¤½ø³Ì
+     * æ— å®ˆæŠ¤è¿›ç¨‹
      *
      *
      */
@@ -632,7 +663,7 @@ long main(int argc, char *argv[]) {
 
 jint Java_com_zed1_System_client(JNIEnv* env, jobject thiz, jint argc, jobjectArray args) {
     /**
-     * ×ª»»²ÎÊı
+     * è½¬æ¢å‚æ•°
      *
      *
      */
