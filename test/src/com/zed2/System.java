@@ -8,7 +8,7 @@
 // | Author:zy_cwind<391321232@qq.com>
 // +----------------------------------------------------------------------
 
-package com.zed1;
+package com.zed2;
 
 public class System {
 	static {

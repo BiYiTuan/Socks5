@@ -97,6 +97,7 @@ include $(CLEAR_VARS)
 LOCAL_CFLAGS := -DJNI
 LOCAL_STATIC_LIBRARIES := libturnclient libancillary libevent
 LOCAL_C_INCLUDES:= \
+		$(LOCAL_PATH)/turnclient \
 		$(LOCAL_PATH)/libevent-release-2.0.22-stable/include \
 		$(LOCAL_PATH)/libevent-release-2.0.22-stable/include/event2
 LOCAL_SRC_FILES := client.c

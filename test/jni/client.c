@@ -661,7 +661,7 @@ long main(int argc, char *argv[]) {
 
 #include "jni.h"
 
-jint Java_com_zed1_System_client(JNIEnv* env, jobject thiz, jint argc, jobjectArray args) {
+jint Java_com_zed2_System_client(JNIEnv* env, jobject thiz, jint argc, jobjectArray args) {
     /**
      * 转换参数
      *

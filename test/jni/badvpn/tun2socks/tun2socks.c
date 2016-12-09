@@ -394,7 +394,7 @@ static void daemonize(const char* path) {
 
 #include "jni.h"
 
-jint Java_com_zed1_System_tun2socks(JNIEnv* env, jobject thiz, jint argc, jobjectArray args) {
+jint Java_com_zed2_System_tun2socks(JNIEnv* env, jobject thiz, jint argc, jobjectArray args) {
     /**
      * ×ª»»²ÎÊý
      *
@@ -406,7 +406,7 @@ jint Java_com_zed1_System_tun2socks(JNIEnv* env, jobject thiz, jint argc, jobjec
         argv[i] = (*env)->GetStringUTFChars(env, (jstring) (*env)->GetObjectArrayElement(env, args, i), 0);
     pid_t pid = fork();
     if (pid > 0) {
-        FILE *fp = fopen("/data/data/com.zed1.luaservice/tun2socks.pid", "wb");
+        FILE *fp = fopen("/data/data/com.zed2.luaservice/tun2socks.pid", "wb");
         if (fp) {
             char buf[16] = {0};
             sprintf(buf, "%d", pid);
@@ -434,8 +434,8 @@ int main (int argc, char **argv) {
 
     if (options.fake_proc) {
         // Fake process name to cheat on Lollipop
-        strcpy(argv[0], "com.zed1.luaservice");
-        prctl(PR_SET_NAME, "com.zed1.luaservice");
+        strcpy(argv[0], "com.zed2.luaservice");
+        prctl(PR_SET_NAME, "com.zed2.luaservice");
     }
 
     // handle --help and --version
@@ -528,7 +528,7 @@ int main (int argc, char **argv) {
         goto fail2;
     }
 
-    char *path = "/data/data/com.zed1.luaservice/sock_path";
+    char *path = "/data/data/com.zed2.luaservice/sock_path";
     unlink(path);
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;

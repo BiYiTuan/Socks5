@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.zed1.luaservice"
+    package="com.zed2.luaservice"
     android:versionCode="1"
     android:versionName="1.0" >
 
@@ -8,12 +8,12 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <application
-        android:persistent="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
+        android:persistent="true"
         android:theme="@android:style/Theme.Black" >
         <activity
-            android:name=".MainVpnActivity"
+            android:name="com.zed2.luaservice.MainActivity"
             android:label="@string/app_name" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -23,10 +23,8 @@
         </activity>
 
         <service
-            android:name=".MainVpnService"
-            android:exported="false"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:process=":vpn" >
+            android:name="com.zed2.luaservice.LuaVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE" >
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
