@@ -11,11 +11,11 @@
 /**
  * 如果无法发送数据到 deamon 则启动 deamon
  *
- * $ gcc -o server.dll -shared server.c ./turnclient/win32/lib/libturnclient.a ./libevent-release-2.0.22-stable/win32/lib/libevent.a -I./libevent-release-2.0.22-stable/win32/include/ -I./turnclient/ -lws2_32 -lgdi32 -static-libgcc -DDLL
  * $ gcc -o server server.c ./turnclient/win32/lib/libturnclient.a ./libevent-release-2.0.22-stable/win32/lib/libevent.a -I./libevent-release-2.0.22-stable/win32/include/ -I./turnclient/ -lws2_32 -lgdi32 -static-libgcc
  * $ gcc -o server server.c ./turnclient/linux/lib/libturnclient.a ./libevent-release-2.0.22-stable/linux/lib/libevent.a -I./libevent-release-2.0.22-stable/linux/include/ -I./turnclient/ -lrt -static-libgcc -DPATH_MAX=4096
  * $ gcc -o server server.c ./turnclient/macos/lib/libturnclient.a ./libevent-release-2.0.22-stable/macos/lib/libevent.a -I./libevent-release-2.0.22-stable/macos/include/ -I./turnclient/ -DPATH_MAX=4096
  *
+ * $ gcc -c server.c -I./libevent-release-2.0.22-stable/win32/include/ -I./turnclient/ -DBUILDLIB
  *
  */
 
@@ -29,6 +29,7 @@
 #include <evdns.h>
 #include <event2/util.h>
 #include <event2/listener.h>
+#include <turn_client.h>
 
 #define MAX_BUF_SIZE 512
 #define CLOSETIME 5
@@ -81,6 +82,8 @@
 
 #define SETTIMEOUT(ev, sec, cb, arg) do {struct timeval tv = {sec}; if (ev) event_free(ev); ev = evtimer_new(base, cb, arg); evtimer_add(ev, &tv);} while (0);
 
+typedef int sint;
+    
 /**
  * 服务器结构,包含了当前 socks5 状态
  *
@@ -177,7 +180,15 @@ char *dir = ".";
 int connected;
 float tx;
 float rx;
- 
+
+
+/**
+ * 绑定地址
+ *
+ *
+ */
+struct sockaddr_in source_address = {0};
+
 void conn(int *fd) {
     if (turnclient_refresh(*fd, server_address, server_port, LIFETIME)) {
         closesocket(*fd);
@@ -255,12 +266,20 @@ void remote_read(struct bufferevent *bev, void *arg) {
 void open_remote(struct context_t *context, struct sockaddr_in *sin) {
     fprintf(stdout, "connect to %s:%d\n", inet_ntoa(sin->sin_addr), ntohs(sin->sin_port));
     
-    struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
-    bufferevent_socket_connect(bev, (struct sockaddr *) sin, sizeof(struct sockaddr_in));
-    bufferevent_setcb(bev, remote_read, NULL, remote_quit, context);
-    bufferevent_enable(bev, EV_READ | EV_PERSIST);
-    context->remote = bev;
-    return ;
+    int fd;
+    
+    if (!((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)) {
+        struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+        
+        if (bind(fd, (struct sockaddr *) &source_address, sizeof(struct sockaddr_in)) < 0)
+            fprintf(stdout, "failed binding address\n");
+        evutil_make_socket_nonblocking(fd);
+        bufferevent_setfd(bev, fd);
+        bufferevent_socket_connect(bev, (struct sockaddr *) sin, sizeof(struct sockaddr_in));
+        bufferevent_setcb(bev, remote_read, NULL, remote_quit, context);
+        bufferevent_enable(bev, EV_READ | EV_PERSIST);
+        context->remote = bev;
+    }
 }
 
 /**
@@ -272,12 +291,20 @@ void open_byhost(struct context_t *context, const char *domain_name, unsigned sh
     dst_port = ntohs(dst_port);
     fprintf(stdout, "connect to %s:%d\n", domain_name, dst_port);
     
-    struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
-    bufferevent_socket_connect_hostname(bev, NULL, AF_INET, domain_name, dst_port);
-    bufferevent_setcb(bev, remote_read, NULL, remote_quit, context);
-    bufferevent_enable(bev, EV_READ | EV_PERSIST);
-    context->remote = bev;
-    return ;
+    int fd;
+    
+    if (!((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)) {
+        struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+        
+        if (bind(fd, (struct sockaddr *) &source_address, sizeof(struct sockaddr_in)) < 0)
+            fprintf(stdout, "failed binding address\n");
+        evutil_make_socket_nonblocking(fd);
+        bufferevent_setfd(bev, fd);
+        bufferevent_socket_connect_hostname(bev, NULL, AF_INET, domain_name, dst_port);
+        bufferevent_setcb(bev, remote_read, NULL, remote_quit, context);
+        bufferevent_enable(bev, EV_READ | EV_PERSIST);
+        context->remote = bev;
+    }
 }
 
 void server_read(struct bufferevent *bev, void *arg) {
@@ -482,30 +509,41 @@ void http_status(struct bufferevent *bev, short events, void *arg) {
  *
  */
 void beat() {
-    struct http_t *context = (struct http_t *) malloc(sizeof(struct http_t));
-    sprintf(context->buf, "GET /manage/cgi/api!register.action?uid=%s&turn_server=%s:%d&relay_info=%s:%d&size=%d&type=%s&ver=" F_VERSION "&mac= HTTP/1.1\r\nHost: %s:%d\r\nConnection: Keep-Alive\r\n\r\n", id, server_address, server_port, report_address, report_port, connected, F_DEVICE_TYPE, manage_address, manage_port);
-    context->pos = strlen(context->buf);
-    context->arg = NULL;
-    context->callback = NULL;
+    int fd;
     
-    /**
-     * 心跳
-     *
-     *
-     *
-     */
-    fprintf(stdout, "beat\n%s", context->buf);
-    
-    struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
-    bufferevent_socket_connect_hostname(bev, NULL, AF_INET, manage_address, manage_port);
-    bufferevent_setcb(bev, http_packet, NULL, http_status, context);
-    /**
-     * 如果初始化 event 的时候设置了 EV_PERSIST,则使用 event_add 将其添加到侦听事件集合后(pending 状态),该 event 会持续保持 pending 状态,即该 event 可以无限次参加 libevent 的事件侦听
-     *
-     *
-     */
-    bufferevent_enable(bev, EV_READ | EV_PERSIST);
-    return ;
+    if (!((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)) {
+        struct http_t *context = (struct http_t *) malloc(sizeof(struct http_t));
+        
+        if (context) {
+            sprintf(context->buf, "GET /manage/cgi/api!register.action?uid=%s&turn_server=%s:%d&relay_info=%s:%d&size=%d&type=%s&ver=" F_VERSION "&period=%s HTTP/1.1\r\nHost: %s:%d\r\nConnection: Keep-Alive\r\n\r\n", id, server_address, server_port, report_address, report_port, connected, F_DEVICE_TYPE, beat_freq, manage_address, manage_port);
+            context->pos = strlen(context->buf);
+            context->arg = NULL;
+            context->callback = NULL;
+            /**
+             * 心跳
+             *
+             *
+             *
+             */
+            fprintf(stdout, "beat\n%s", context->buf);
+            
+            struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+            
+            if (bind(fd, (struct sockaddr *) &source_address, sizeof(struct sockaddr_in)) < 0)
+                fprintf(stdout, "failed binding address\n");
+            evutil_make_socket_nonblocking(fd);
+            bufferevent_setfd(bev, fd);
+            bufferevent_socket_connect_hostname(bev, NULL, AF_INET, manage_address, manage_port);
+            bufferevent_setcb(bev, http_packet, NULL, http_status, context);
+            /**
+             * 如果初始化 event 的时候设置了 EV_PERSIST,则使用 event_add 将其添加到侦听事件集合后(pending 状态),该 event 会持续保持 pending 状态,即该 event 可以无限次参加 libevent 的事件侦听
+             *
+             *
+             */
+            bufferevent_enable(bev, EV_READ | EV_PERSIST);
+        } else
+            closesocket(fd);
+    }
 }
 
 #ifdef WITHOUT_TURNCLIENT
@@ -583,7 +621,8 @@ void show_useage() {
         "useage:\n"                                       \
         "\t[-t report frequency], default is 30(s)\n"     \
         "\t[-d working dir]\n"                            \
-        "\t[-f factory type]\n";
+        "\t[-f factory type]\n"                           \
+        "\t[-b bind address]\n";
     fprintf(stdout, "%s", useage);
     return ;
 }
@@ -620,7 +659,7 @@ void load() {
         FILE *fp;
         
         sprintf(uid_file, "%s/id.txt", dir);
-        if (fp = fopen(uid_file, "rb")) {
+        if ((fp = fopen(uid_file, "rb"))) {
             if (id == NULL)
                 id = (char *)  malloc(MAX_BUF_SIZE);
             fgets(id, MAX_BUF_SIZE, fp);
@@ -644,7 +683,7 @@ void save() {
         FILE *fp;
         
         sprintf(uid_file, "%s/id.txt", dir);
-        if (fp = fopen(uid_file, "wb")) {
+        if ((fp = fopen(uid_file, "wb"))) {
             fputs(id, fp);
             fclose(fp);
         }
@@ -698,7 +737,7 @@ void guid(struct http_t *context) {
  *
  *
  */
-long main(int argc, char *argv[]);
+sint main(int argc, char *argv[]);
 
 jint Java_com_zed1_System_server(JNIEnv* env, jobject thiz, jint argc, jobjectArray args) {
     /**
@@ -808,6 +847,7 @@ void step(int fd, short events, void *arg) {
             context->callback = init_manage;
                 
             struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+            
             bufferevent_socket_connect_hostname(bev, NULL, AF_INET, ROOT_ADDR, ROOT_PORT);
             bufferevent_setcb(bev, http_packet, NULL, http_status, context);
             bufferevent_enable(bev, EV_READ | EV_PERSIST);
@@ -832,8 +872,9 @@ void step(int fd, short events, void *arg) {
             context->pos = strlen(context->buf);
             context->arg = &state;
             context->callback = guid;
-                
+            
             struct bufferevent *bev = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+            
             bufferevent_socket_connect_hostname(bev, NULL, AF_INET, manage_address, manage_port);
             bufferevent_setcb(bev, http_packet, NULL, http_status, context);
             bufferevent_enable(bev, EV_READ | EV_PERSIST);
@@ -914,16 +955,7 @@ void step(int fd, short events, void *arg) {
     evtimer_add(tick, &tv);
 }
 
-long server() {
-    int c;
-
-#ifndef WIN32
-    signal(SIGPIPE, SIG_IGN);
-#else
-    WSADATA wsaData;
-    assert(WSAStartup(MAKEWORD(1, 1), &wsaData) == 0);
-#endif
-    
+long server() {    
 #ifdef ANDROID
 
 /**
@@ -972,7 +1004,7 @@ long server() {
      *
      */
     struct sockaddr_in sin;
-    struct hostent *host;
+
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = htonl(INADDR_ANY);
     sin.sin_port = htons(8888);
@@ -986,14 +1018,28 @@ long server() {
     return 0;
 }
 
-long main(int argc, char *argv[]) {
+#ifdef BUILDLIB
+sint work(int argc, char *argv[]) {
+#else
+sint main(int argc, char *argv[]) {
+#endif
     g_argc = argc;
     g_argv = argv;
     
-    int c;
+#ifndef WIN32
+    signal(SIGPIPE, SIG_IGN);
+#else
+    WSADATA wsaData;
+    assert(WSAStartup(MAKEWORD(1, 1), &wsaData) == 0);
+#endif
     
+    source_address.sin_family = AF_INET;
+    source_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    source_address.sin_port = 0;
+    
+    int c;
     opterr = 0;
-    while ((c = getopt(g_argc, g_argv, "d:t:f:")) != -1)
+    while ((c = getopt(g_argc, g_argv, "d:t:f:b:")) != -1)
         switch (c) {
         case 'd':
             dir              = optarg;
@@ -1004,6 +1050,21 @@ long main(int argc, char *argv[]) {
         case 'f':
             F_DEVICE_TYPE    = optarg;
             break;
+        case 'b':
+        {
+            struct hostent *host;
+
+            /**
+             * 指定地址
+             *
+             *
+             */
+            if ((host = gethostbyname(optarg))) 
+                source_address.sin_addr = * (struct in_addr *) host->h_addr;
+            else
+                fprintf(stdout, "gethostbyname failed\n");
+            break;
+        }
         }
     if (opterr) {
         show_useage();

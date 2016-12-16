@@ -152,7 +152,7 @@ public class MainActivity extends Activity {
 					Log.d(TAG, "connect error.");
 				}
 			}
-			mHandler.post(new ReleaseAllResources());
+			// mHandler.post(new ReleaseAllResources());
 		}
 	};
 	

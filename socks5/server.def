@@ -1,5 +1,0 @@
-LIBRARY server
-VERSION 0.1
-
-EXPORTS
-  loop

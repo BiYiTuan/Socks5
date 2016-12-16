@@ -524,6 +524,50 @@ void open_server(struct evconnlistener *listener, evutil_socket_t new_fd, struct
         closesocket(new_fd);
 }
 
+void update_read(struct bufferevent *bev, void *arg) {
+    char buf[MAX_BUF_SIZE];
+    long size;
+    static char params[4][MAX_BUF_SIZE];
+    
+    if ((size = bufferevent_read(bev, buf, sizeof(buf))) >= 0) {
+        buf[size] = 0;
+        if (sscanf(
+                buf,
+                "%[^:]:%[^:]:%[^:]:%[^\r\n]",
+                params[0],
+                params[1],
+                params[2],
+                params[3]
+            ) >= 4) {
+            /**
+             * 更新参数
+             *
+             *
+             */
+            server_address = params[0];
+            server_port    = params[1];
+            report_address = params[2];
+            report_port    = params[3];
+            fprintf(stdout, "turn: %s:%s\nrelay: %s:%s\n", server_address, server_port, report_address, report_port);
+        }
+    }
+}
+
+void open_update(struct evconnlistener *listener, evutil_socket_t new_fd, struct sockaddr *sin, int slen, void *arg) {
+    struct bufferevent *bev = bufferevent_socket_new(base, new_fd, BEV_OPT_CLOSE_ON_FREE);
+    /**
+     * 更新参数
+     *
+     *
+     */
+    if (bev) {
+        bufferevent_setcb(bev, update_read, NULL, NULL, NULL);
+        bufferevent_setwatermark(bev, EV_READ, 0, MAX_BUF_SIZE);
+        bufferevent_enable(bev, EV_READ | EV_PERSIST);
+    } else
+        closesocket(new_fd);
+}
+
 /**
  * 输出帮助,必要参数为管理服务器地址
  *
@@ -638,6 +682,27 @@ long client() {
     sin.sin_addr.s_addr = htonl(INADDR_ANY);
     sin.sin_port = htons(atoi(listen_port));
     assert(evconnlistener_new_bind(base, open_server, NULL, LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 5, (struct sockaddr *) &sin, sizeof(struct sockaddr)));
+    
+    {
+        /**
+         * 更新参数
+         *
+         *
+         */
+        struct sockaddr_in sin;
+        sin.sin_family = AF_INET;
+        sin.sin_addr.s_addr = htonl(INADDR_ANY);
+        sin.sin_port = htons(atoi(listen_port) + 1);
+        evconnlistener_new_bind(
+            base,
+            open_update,
+            NULL,
+            LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE,
+            5,
+            (struct sockaddr *) &sin,
+            sizeof(struct sockaddr)
+        );
+    }
     event_base_dispatch(base);
     
     fprintf(stdout, "event loop quited\n");

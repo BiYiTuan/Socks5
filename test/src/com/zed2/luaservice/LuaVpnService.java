@@ -176,10 +176,8 @@ public class LuaVpnService extends VpnService {
 			if (mUid != null &&
 				mManage != null &&
 				mManagePort != null) {
-				
+				Socket socket = new Socket();
 				try {
-                    Socket socket = new Socket();
-                    
 					socket.setTcpNoDelay(true);
 					protect(socket);
 					socket.connect(new InetSocketAddress(mManage, Integer.parseInt(mManagePort)));
@@ -234,7 +232,18 @@ public class LuaVpnService extends VpnService {
 				Log.d(TAG, "client restarted.");
 				restart();
 			} else {
-				mDescriptor = new Builder().addAddress("26.26.26.1", 24).addRoute("0.0.0.0", 0).addRoute("8.8.0.0", 16).setMtu(1500).establish();
+				Builder builder = new Builder().setMtu(1500).addAddress("26.26.26.1", 24);
+				String[] p;
+				/**
+				 * 绕过局域网
+				 * 
+				 * 
+				 */
+				for (String bypass : getResources().getStringArray(R.array.bypass_private_route)) {
+					p = bypass.split("/");
+					builder.addRoute(p[0], Integer.parseInt(p[1]));
+				}
+				mDescriptor = builder.establish();
 				if (mDescriptor != null) {
 					int fd = mDescriptor.getFd();
 					String[] params;
